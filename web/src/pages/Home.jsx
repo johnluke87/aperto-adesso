@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api.js'
 import { useApp } from '../App.jsx'
 import { CatBadge, CatChips, LocationSearch, PhoneIcon, PlaceMap, StatusPill, TimePicker } from '../components.jsx'
-import { DEFAULT_CATS, formatAt, go, km, status } from '../util.js'
+import { formatAt, go, km, status } from '../util.js'
+import { loadPrefs, savePrefs } from '../prefs.js'
+
+const RADII = [1, 3, 5, 10, 20]
 
 export default function Home() {
   const { route } = useApp()
@@ -17,7 +20,8 @@ function searchQuery(base, patch) {
 
 function Landing() {
   const { user, config } = useApp()
-  const pick = ({ lat, lng, label }) => go('/', { lat, lng, label, r: 5, cats: DEFAULT_CATS.join(',') })
+  const prefs = loadPrefs(user)
+  const pick = ({ lat, lng, label }) => go('/', { lat, lng, label, r: prefs.r, cats: prefs.cats.join(',') })
   const home = user?.lat ? () => go('/', { lat: user.lat, lng: user.lng, label: 'Casa · ' + (user.place_name || ''), r: user.radius_km, cats: user.cats.join(',') }) : null
   const today = config?.today
   return (
@@ -51,12 +55,13 @@ function Landing() {
 }
 
 function LocationQuick({ cats, label }) {
+  const { user } = useApp()
   const [busy, setBusy] = useState(false)
   const run = () => {
     if (!navigator.geolocation) return
     setBusy(true)
     navigator.geolocation.getCurrentPosition(
-      (pos) => go('/', { lat: pos.coords.latitude.toFixed(5), lng: pos.coords.longitude.toFixed(5), label: 'Vicino a te', r: 5, cats }),
+      (pos) => go('/', { lat: pos.coords.latitude.toFixed(5), lng: pos.coords.longitude.toFixed(5), label: 'Vicino a te', r: loadPrefs(user).r, cats }),
       () => { setBusy(false); alert('Posizione non disponibile: scrivi il comune nella casella.') },
       { timeout: 12000, maximumAge: 60000 })
   }
@@ -64,16 +69,17 @@ function LocationQuick({ cats, label }) {
 }
 
 function Results({ q }) {
-  const { favKeys, toggleFav, user, config } = useApp()
+  const { favKeys, toggleFav, user, setUser, config } = useApp()
+  const prefs = loadPrefs(user)
   const center = useMemo(() => ({ lat: +q.lat, lng: +q.lng }), [q.lat, q.lng])
-  const r = Math.max(1, Math.min(20, +(q.r || 5)))
-  const cats = q.cats ? q.cats.split(',').filter(Boolean) : DEFAULT_CATS
+  const r = Math.max(1, Math.min(20, +(q.r || prefs.r)))
+  const cats = q.cats ? q.cats.split(',').filter(Boolean) : prefs.cats
   const at = q.at || ''
   const [radius, setRadius] = useState(r)
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(false)
-  const [onlyOpen, setOnlyOpen] = useState(false)
+  const [onlyOpen, setOnlyOpen] = useState(prefs.only_open)
   const [selected, setSelected] = useState(null)
   const [view, setView] = useState('list')
   const [showFilters, setShowFilters] = useState(false)
@@ -91,6 +97,23 @@ function Results({ q }) {
   }, [q.lat, q.lng, r, q.cats, at])
 
   const update = (patch) => go('/', searchQuery({ ...q, r, cats: cats.join(','), at }, patch))
+  // ogni scelta fatta qui diventa il filtro iniziale delle prossime ricerche
+  const remember = (patch) => savePrefs({ cats, r, only_open: onlyOpen, ...patch }, user, setUser)
+  const setCats = (c) => {
+    if (!c.length) return
+    update({ cats: c.join(',') })
+    remember({ cats: c })
+  }
+  const setR = (v) => {
+    setRadius(v)
+    if (v === r) return
+    update({ r: v })
+    remember({ r: v })
+  }
+  const setOpen = (v) => {
+    setOnlyOpen(v)
+    remember({ only_open: v })
+  }
   const places = (data?.places ?? []).filter((p) => !onlyOpen || p.open === true)
   const counts = (data?.places ?? []).reduce((a, p) => { a[status(p).key]++; return a }, { open: 0, turno: 0, closed: 0, unknown: 0 })
   const showPs = cats.includes('pronto_soccorso')
@@ -104,22 +127,32 @@ function Results({ q }) {
           {data?.day?.holiday && <span className="tag-holiday">Festivo: {data.day.holiday}</span>}
         </div>
         <button className="btn btn-ghost btn-sm" onClick={() => setShowFilters(!showFilters)} aria-expanded={showFilters}>
-          {showFilters ? 'Chiudi filtri' : 'Cambia ricerca'}
+          {showFilters ? 'Chiudi' : 'Cambia posto o ora'}
         </button>
       </div>
       {showFilters && (
         <div className="filters">
           <LocationSearch compact onPick={({ lat, lng, label }) => update({ lat, lng, label })} />
-          <div className="filter-row">
-            <label className="radius">Raggio <strong>{radius} km</strong>
-              <input type="range" min="1" max="20" value={radius} onChange={(e) => setRadius(+e.target.value)}
-                onMouseUp={() => update({ r: radius })} onTouchEnd={() => update({ r: radius })} onKeyUp={() => update({ r: radius })} />
-            </label>
-          </div>
           <TimePicker at={at} onChange={(v) => update({ at: v })} />
-          <CatChips cats={cats} onChange={(c) => c.length && update({ cats: c.join(',') })} />
         </div>
       )}
+
+      <div className="quickfilters">
+        <CatChips cats={cats} onChange={setCats} />
+        <div className="radius-bar" role="group" aria-label="Raggio di ricerca">
+          <span className="radius-label">Raggio</span>
+          {RADII.map((v) => (
+            <button key={v} type="button" className={'chip chip-r' + (radius === v ? ' on' : '')} aria-pressed={radius === v} onClick={() => setR(v)}>
+              {v} km
+            </button>
+          ))}
+          <input type="range" min="1" max="20" value={radius} aria-label={`Raggio: ${radius} km`}
+            onChange={(e) => setRadius(+e.target.value)}
+            onMouseUp={() => setR(radius)} onTouchEnd={() => setR(radius)} onKeyUp={() => setR(radius)} />
+          {!RADII.includes(radius) && <strong className="radius-val">{radius} km</strong>}
+        </div>
+        <p className="small muted prefs-note">{user ? 'Le tue scelte restano salvate nel tuo account.' : 'Le tue scelte restano salvate in questo browser.'}</p>
+      </div>
 
       {err && <div className="alert alert-err">{err}</div>}
       {data && !data.osm_ok && <div className="alert">OpenStreetMap non risponde in questo momento: mostriamo solo l’anagrafe farmacie del Ministero e i dati in cache. Riprova tra poco.</div>}
@@ -131,7 +164,7 @@ function Results({ q }) {
             {counts.turno > 0 && <span className="c-turno"><b>{counts.turno}</b> di turno</span>}
             <span><b>{counts.closed}</b> chiusi</span>
             <span className="muted"><b>{counts.unknown}</b> senza orario</span>
-            <label className="only-open"><input type="checkbox" checked={onlyOpen} onChange={(e) => setOnlyOpen(e.target.checked)} /> Solo aperti</label>
+            <label className="only-open"><input type="checkbox" checked={onlyOpen} onChange={(e) => setOpen(e.target.checked)} /> Solo aperti</label>
           </>
         )}
         <div className="view-toggle" role="tablist">

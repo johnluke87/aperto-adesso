@@ -309,6 +309,21 @@ try {
         out(['user' => public_user(load_user($uid))]);
     }
 
+    // Filtri iniziali della ricerca (categorie, raggio, solo aperti): li salva la pagina dei risultati quando cambiano
+    if ($path === '/me/prefs' && $method === 'PUT') {
+        $cats = parse_cats($body['cats'] ?? []);
+        if (!$cats) {
+            fail('Scegli almeno una categoria.');
+        }
+        db()->prepare('UPDATE aperto_users SET pref_cats=?, pref_radius=?, pref_only_open=? WHERE id=?')->execute([
+            implode(',', $cats),
+            max(1, min(20, (int) ($body['r'] ?? 5))),
+            !empty($body['only_open']) ? 1 : 0,
+            $uid,
+        ]);
+        out(['user' => public_user(load_user($uid))]);
+    }
+
     if ($path === '/me/alerts' && $method === 'PUT') {
         $on = !empty($body['alert_on']);
         if ($on && $u['lat'] === null) {

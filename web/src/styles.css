@@ -272,3 +272,18 @@ code { font-size: .85em; background: var(--unknown-soft); padding: .1em .35em; b
 .plist.plain { margin-top: 1rem; }
 
 .leaflet-container { font: inherit; }
+
+/* Filtri sempre visibili sopra i risultati: categorie e raggio (si salvano come preferenze) */
+.quickfilters { display: grid; gap: .55rem; margin-bottom: .8rem; }
+.radius-bar { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.radius-label { font-size: .88rem; font-weight: 600; margin-right: .2rem; }
+.radius-bar input[type="range"] { flex: 1 1 120px; min-width: 120px; max-width: 220px; accent-color: var(--brand); }
+.radius-val { font-size: .88rem; }
+.chip-r { padding: .35rem .65rem; }
+.prefs-note { margin: 0; }
+@media (max-width: 640px) {
+  /* sul telefono le categorie scorrono in orizzontale su una riga sola */
+  .quickfilters .catchips { flex-wrap: nowrap; overflow-x: auto; padding-bottom: .2rem; margin: 0 -16px; padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
+  .quickfilters .catchips::-webkit-scrollbar { display: none; }
+  .quickfilters .chip { flex: none; }
+}

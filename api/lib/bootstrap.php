@@ -123,6 +123,20 @@ function schema_install(PDO $pdo): void {
     $pdo->exec("CREATE TABLE IF NOT EXISTS aperto_alert_log (
         user_id INT UNSIGNED NOT NULL, sent_on DATE NOT NULL, PRIMARY KEY (user_id, sent_on)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    // Preferenze di ricerca (filtri iniziali), aggiunte dopo la prima versione: le tabelle online esistono già.
+    // NULL = mai scelte, si usano quelle di base.
+    $have = $pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'aperto_users'")->fetchAll(PDO::FETCH_COLUMN);
+    $add = [
+        'pref_cats' => 'VARCHAR(200) NULL',
+        'pref_radius' => 'TINYINT UNSIGNED NULL',
+        'pref_only_open' => 'TINYINT(1) NULL',
+    ];
+    foreach ($add as $col => $def) {
+        if (!in_array($col, $have, true)) {
+            $pdo->exec("ALTER TABLE aperto_users ADD COLUMN $col $def");
+        }
+    }
 }
 
 function cors(): void {
@@ -193,6 +207,12 @@ function public_user(array $u): array {
         'lng' => $u['lng'] !== null ? (float) $u['lng'] : null,
         'place_name' => $u['place_name'], 'radius_km' => (int) $u['radius_km'],
         'cats' => $u['cats'] !== '' ? explode(',', $u['cats']) : [], 'alert_on' => (bool) $u['alert_on'],
+        // filtri iniziali della ricerca; null se l'utente non li ha mai scelti
+        'prefs' => ($u['pref_cats'] ?? null) === null ? null : [
+            'cats' => $u['pref_cats'] !== '' ? explode(',', $u['pref_cats']) : [],
+            'r' => (int) $u['pref_radius'],
+            'only_open' => (bool) $u['pref_only_open'],
+        ],
     ];
 }
 
