@@ -5,12 +5,16 @@ Cosa è aperto adesso vicino a te, in tutta Italia. Vedi [SPEC.md](SPEC.md) e [B
 ## Struttura
 
 - `api/` — PHP 8 + MySQL (router in `api/index.php`, librerie in `api/lib/`). Lo schema DB si crea da solo al primo accesso.
-- `web/` — sorgenti React (Vite). La build finisce nella root del progetto (`index.html` + `assets/`), servita da XAMPP.
+- `web/` — sorgenti React (Vite). `npm run build` produce `web/dist` (percorsi relativi).
+
+Online: https://www.gianlucadario.com/apps/aperto-adesso/ — questa cartella è `apps/aperto-adesso/sorgenti` del sito:
+`_deploy/carica.bat` compila `web/`, copia `web/dist` e `api/` (mai `config.php`, `cache/`, `data/`) e carica via FTP.
+Sul sito: database in `/private/db.php` (sezione `aperto`, tabelle `aperto_`), segreti in `/private/aperto-adesso.php`, email con `/private/mailer.php`.
 - `api/cache/` (Overpass, Nominatim, CSV Ministero) e `api/data/outbox/` (email in locale) non sono raggiungibili dal web.
 
 ## Avvio in locale
 
-1. XAMPP con Apache (mod_rewrite) e MySQL attivi. L’app è su `http://localhost/aperto-adesso/`.
+1. XAMPP con Apache (mod_rewrite) e MySQL attivi. L’app è su `http://localhost/gianlucadario/apps/aperto-adesso/` (dopo `_deploy/compila.bat`).
 2. Override facoltativi in `api/config.local.php` (stesso formato di `config.php`): credenziali DB, `debug => false`, `cron_token`, `ps_json_url`, `farmacie_turno_key`.
 3. Frontend:
 
@@ -18,14 +22,14 @@ Cosa è aperto adesso vicino a te, in tutta Italia. Vedi [SPEC.md](SPEC.md) e [B
 cd web && npm install && npm run build
 ```
 
-Per sviluppare con hot reload: `npm run dev` in `web/` (il proxy inoltra `/aperto-adesso/api` ad Apache).
+Per sviluppare con hot reload: `npm run dev` in `web/` (il proxy inoltra `/api` alla copia in XAMPP).
 
 ## Cron
 
 Ogni ora (aggiorna il CSV farmacie ogni 24 h, pulisce dati scaduti, invia gli avvisi la domenica, nei festivi e dopo le 20):
 
 ```bash
-curl -s "http://localhost/aperto-adesso/api/cron?token=aperto-adesso-cron-locale"
+curl -s "http://localhost/gianlucadario/apps/aperto-adesso/api/cron?token=aperto-adesso-cron-locale"
 ```
 
 Aggiungi `&force=1` per provare l’invio degli avvisi fuori finestra. In locale le email sono file HTML in `api/data/outbox/`.

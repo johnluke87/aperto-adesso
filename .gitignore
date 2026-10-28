@@ -1,1 +1,5 @@
 web/node_modules/
+web/dist/
+api/cache/
+api/data/
+api/config.local.php

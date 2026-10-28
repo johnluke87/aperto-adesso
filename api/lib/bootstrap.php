@@ -3,19 +3,46 @@ declare(strict_types=1);
 
 date_default_timezone_set('Europe/Rome');
 
+function is_local(): bool {
+    return !isset($_SERVER['SERVER_ADDR']) || in_array($_SERVER['SERVER_ADDR'], ['127.0.0.1', '::1', 'localhost'], true);
+}
+
+/** Un file della cartella private/ del sito (www.gianlucadario.com), cercato nelle cartelle superiori. */
+function site_private(string $file): ?string {
+    for ($dir = __DIR__, $i = 0; $i < 7; $i++, $dir = dirname($dir)) {
+        if (is_file($dir . '/private/' . $file)) {
+            return $dir . '/private/' . $file;
+        }
+    }
+    return null;
+}
+
 function cfg(): array {
     static $c;
     if (!$c) {
         $c = require dirname(__DIR__) . '/config.php';
-        $local = dirname(__DIR__) . '/config.local.php';
-        if (is_file($local)) {
-            $extra = require $local;
-            if (is_array($extra)) {
-                $c = array_replace_recursive($c, $extra);
+        // sul sito: segreti (cron_token, chiavi) in private/aperto-adesso.php; in sviluppo: config.local.php
+        foreach ([site_private('aperto-adesso.php'), dirname(__DIR__) . '/config.local.php'] as $file) {
+            if ($file && is_file($file)) {
+                $extra = require $file;
+                if (is_array($extra)) {
+                    $c = array_replace_recursive($c, $extra);
+                }
             }
         }
+        $c['debug'] ??= is_local();
     }
     return $c;
+}
+
+/** Indirizzo dell'app (per i link nelle email): da config, altrimenti dalla richiesta. */
+function app_url(): string {
+    if (!empty(cfg()['app_url'])) {
+        return rtrim((string) cfg()['app_url'], '/');
+    }
+    $https = ($_SERVER['HTTPS'] ?? '') !== '' && ($_SERVER['HTTPS'] ?? '') !== 'off';
+    $base = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/api/index.php', 2)), '/');
+    return ($https ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . $base;
 }
 
 function db(): PDO {
@@ -24,9 +51,19 @@ function db(): PDO {
         return $pdo;
     }
     $c = cfg()['db'];
-    $root = new PDO("mysql:host={$c['host']};charset={$c['charset']}", $c['user'], $c['pass'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    // sul sito: credenziali in /private/db.php (sezione "aperto"), DB condiviso con altre app: tabelle aperto_
+    if ($file = site_private('db.php')) {
+        $all = require $file;
+        if (isset($all['aperto'])) {
+            $p = $all['aperto'][is_local() ? 'local' : 'prod'];
+            $c = ['host' => $p['host'], 'name' => $p['db'], 'user' => $p['user'], 'pass' => $p['password'], 'charset' => 'utf8mb4', 'create' => false];
+        }
+    }
     $name = preg_replace('/[^a-z0-9_]/i', '', $c['name']);
-    $root->exec("CREATE DATABASE IF NOT EXISTS `$name` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+    if ($c['create'] ?? true) {
+        $root = new PDO("mysql:host={$c['host']};charset={$c['charset']}", $c['user'], $c['pass'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $root->exec("CREATE DATABASE IF NOT EXISTS `$name` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+    }
     $pdo = new PDO(
         "mysql:host={$c['host']};dbname={$name};charset={$c['charset']}",
         $c['user'], $c['pass'],
@@ -37,7 +74,7 @@ function db(): PDO {
 }
 
 function schema_install(PDO $pdo): void {
-    $pdo->exec("CREATE TABLE IF NOT EXISTS users (
+    $pdo->exec("CREATE TABLE IF NOT EXISTS aperto_users (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(80) NOT NULL,
         email VARCHAR(190) NOT NULL UNIQUE,
@@ -49,13 +86,13 @@ function schema_install(PDO $pdo): void {
         alert_on TINYINT(1) NOT NULL DEFAULT 0,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS sessions (
+    $pdo->exec("CREATE TABLE IF NOT EXISTS aperto_sessions (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id INT UNSIGNED NOT NULL,
         token_hash CHAR(64) NOT NULL UNIQUE,
         expires_at DATETIME NOT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS email_tokens (
+    $pdo->exec("CREATE TABLE IF NOT EXISTS aperto_email_tokens (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id INT UNSIGNED NOT NULL,
         purpose VARCHAR(20) NOT NULL,
@@ -63,13 +100,13 @@ function schema_install(PDO $pdo): void {
         expires_at DATETIME NOT NULL,
         used_at DATETIME NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS favorites (
+    $pdo->exec("CREATE TABLE IF NOT EXISTS aperto_favorites (
         user_id INT UNSIGNED NOT NULL,
         place_key VARCHAR(80) NOT NULL,
-        snapshot JSON NULL,
+        snapshot MEDIUMTEXT NULL,
         PRIMARY KEY (user_id, place_key)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS reports (
+    $pdo->exec("CREATE TABLE IF NOT EXISTS aperto_reports (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id INT UNSIGNED NOT NULL,
         place_key VARCHAR(80) NOT NULL,
@@ -79,11 +116,11 @@ function schema_install(PDO $pdo): void {
         expires_at DATETIME NOT NULL,
         INDEX (place_key, expires_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS rate_limits (
+    $pdo->exec("CREATE TABLE IF NOT EXISTS aperto_rate_limits (
         ip VARCHAR(45) NOT NULL, action VARCHAR(40) NOT NULL, window_start DATETIME NOT NULL, hits INT UNSIGNED NOT NULL DEFAULT 1,
         PRIMARY KEY (ip, action, window_start)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS alert_log (
+    $pdo->exec("CREATE TABLE IF NOT EXISTS aperto_alert_log (
         user_id INT UNSIGNED NOT NULL, sent_on DATE NOT NULL, PRIMARY KEY (user_id, sent_on)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 }
@@ -119,9 +156,9 @@ function fail(string $msg, int $code = 400): never { out(['error' => $msg], $cod
 function rate_limit(string $action, int $max): void {
     $ip = substr((string) ($_SERVER['REMOTE_ADDR'] ?? '0'), 0, 45);
     $hour = (new DateTimeImmutable('now'))->format('Y-m-d H:00:00');
-    db()->prepare('INSERT INTO rate_limits (ip, action, window_start, hits) VALUES (?,?,?,1) ON DUPLICATE KEY UPDATE hits = hits + 1')
+    db()->prepare('INSERT INTO aperto_rate_limits (ip, action, window_start, hits) VALUES (?,?,?,1) ON DUPLICATE KEY UPDATE hits = hits + 1')
         ->execute([$ip, $action, $hour]);
-    $q = db()->prepare('SELECT hits FROM rate_limits WHERE ip=? AND action=? AND window_start=?');
+    $q = db()->prepare('SELECT hits FROM aperto_rate_limits WHERE ip=? AND action=? AND window_start=?');
     $q->execute([$ip, $action, $hour]);
     if ((int) $q->fetchColumn() > $max) {
         fail('Troppe richieste, riprova tra un’ora.', 429);
@@ -162,7 +199,7 @@ function public_user(array $u): array {
 function issue_token(int $userId): string {
     $raw = bin2hex(random_bytes(32));
     $exp = (new DateTimeImmutable('+' . ((int) cfg()['token_days']) . ' days'))->format('Y-m-d H:i:s');
-    db()->prepare('INSERT INTO sessions (user_id, token_hash, expires_at) VALUES (?,?,?)')
+    db()->prepare('INSERT INTO aperto_sessions (user_id, token_hash, expires_at) VALUES (?,?,?)')
         ->execute([$userId, hash('sha256', $raw), $exp]);
     return $raw;
 }
@@ -170,7 +207,7 @@ function issue_token(int $userId): string {
 function require_user(): array {
     $raw = bearer();
     if (!$raw) fail('Devi entrare.', 401);
-    $st = db()->prepare('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at > NOW()');
+    $st = db()->prepare('SELECT u.* FROM aperto_sessions s JOIN aperto_users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at > NOW()');
     $st->execute([hash('sha256', $raw)]);
     $u = $st->fetch();
     if (!$u) fail('Sessione scaduta.', 401);
@@ -180,7 +217,7 @@ function require_user(): array {
 function optional_user(): ?array {
     $raw = bearer();
     if (!$raw) return null;
-    $st = db()->prepare('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at > NOW()');
+    $st = db()->prepare('SELECT u.* FROM aperto_sessions s JOIN aperto_users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at > NOW()');
     $st->execute([hash('sha256', $raw)]);
     $u = $st->fetch();
     return $u ?: null;
@@ -188,12 +225,18 @@ function optional_user(): ?array {
 
 function issue_email_token(int $userId, string $purpose, string $ttl): string {
     $raw = bin2hex(random_bytes(24));
-    db()->prepare('INSERT INTO email_tokens (user_id, purpose, token_hash, expires_at) VALUES (?,?,?,?)')
+    db()->prepare('INSERT INTO aperto_email_tokens (user_id, purpose, token_hash, expires_at) VALUES (?,?,?,?)')
         ->execute([$userId, $purpose, hash('sha256', $raw), (new DateTimeImmutable($ttl))->format('Y-m-d H:i:s')]);
     return $raw;
 }
 
 function app_mail(string $to, string $subject, string $html): void {
+    // sul sito: la casella SMTP comune (private/mailer.php); in locale le email finiscono in data/outbox
+    if (!is_local() && ($mailer = site_private('mailer.php'))) {
+        require_once $mailer;
+        site_send_mail($to, $subject, $html);
+        return;
+    }
     $dir = dirname(__DIR__) . '/data/outbox';
     if (!is_dir($dir)) mkdir($dir, 0775, true);
     $name = date('Ymd-His') . '-' . preg_replace('/[^a-z0-9]+/i', '-', $to) . '.html';

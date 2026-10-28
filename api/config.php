@@ -7,10 +7,10 @@ return [
         'pass' => '',
         'charset' => 'utf8mb4',
     ],
-    'debug' => true,
+    'debug' => null, // null = solo in locale
     'token_days' => 30,
-    'cron_token' => 'aperto-adesso-cron-locale',
-    'app_url' => 'http://localhost/aperto-adesso',
+    'cron_token' => 'aperto-adesso-cron-locale', // sul sito: in private/aperto-adesso.php
+    'app_url' => '', // vuoto = dalla richiesta
     'mail_from' => 'aperto-adesso@localhost',
     'donate_url' => 'https://ko-fi.com/johnluke87',
     'farmacie_turno_key' => '',

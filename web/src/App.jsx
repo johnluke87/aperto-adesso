@@ -112,7 +112,7 @@ export default function App() {
       <main>{page}</main>
       <footer className="footer">
         <span>Dati © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a> (ODbL) · Anagrafe farmacie Ministero della Salute (IODL 2.0)</span>
-        <span><a href="#/fonti">Fonti</a> · <a href="#/privacy">Privacy</a>{config?.donate_url && <> · <a href={config.donate_url} target="_blank" rel="noreferrer">Offrimi un caffè</a></>}</span>
+        <span><a href="#/fonti">Fonti</a> · <a href="#/privacy">Privacy</a></span>
       </footer>
     </Ctx.Provider>
   )

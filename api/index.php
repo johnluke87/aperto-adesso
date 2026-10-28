@@ -49,7 +49,7 @@ function day_info(DateTimeImmutable $at): array {
 }
 
 function app_link(string $hash): string {
-    return rtrim((string) cfg()['app_url'], '/') . '/#' . $hash;
+    return app_url() . '/#' . $hash;
 }
 
 function send_verify(array $u): string {
@@ -61,7 +61,7 @@ function send_verify(array $u): string {
 }
 
 function load_user(int $id): array {
-    $st = db()->prepare('SELECT * FROM users WHERE id=?');
+    $st = db()->prepare('SELECT * FROM aperto_users WHERE id=?');
     $st->execute([$id]);
     return $st->fetch();
 }
@@ -120,7 +120,7 @@ try {
         if (!$p) {
             fail('Luogo non trovato.', 404);
         }
-        $st = db()->prepare('SELECT kind, note, created_at FROM reports WHERE place_key=? AND expires_at > NOW() ORDER BY created_at DESC LIMIT 10');
+        $st = db()->prepare('SELECT kind, note, created_at FROM aperto_reports WHERE place_key=? AND expires_at > NOW() ORDER BY created_at DESC LIMIT 10');
         $st->execute([$p['key']]);
         out(['place' => $p, 'day' => day_info($at), 'recent_reports' => $st->fetchAll()]);
     }
@@ -134,7 +134,7 @@ try {
             fail('Nome, email valida, password di almeno 8 caratteri e consenso privacy.');
         }
         try {
-            db()->prepare('INSERT INTO users (name, email, password_hash) VALUES (?,?,?)')
+            db()->prepare('INSERT INTO aperto_users (name, email, password_hash) VALUES (?,?,?)')
                 ->execute([$name, $email, password_hash($password, PASSWORD_DEFAULT)]);
         } catch (PDOException) {
             fail('Questa email è già registrata.', 409);
@@ -151,7 +151,7 @@ try {
     if ($path === '/auth/login' && $method === 'POST') {
         rate_limit('login', 8);
         $email = strtolower(trim((string) ($body['email'] ?? '')));
-        $st = db()->prepare('SELECT * FROM users WHERE email=?');
+        $st = db()->prepare('SELECT * FROM aperto_users WHERE email=?');
         $st->execute([$email]);
         $u = $st->fetch();
         if (!$u || !password_verify((string) ($body['password'] ?? ''), $u['password_hash'])) {
@@ -162,21 +162,21 @@ try {
 
     if ($path === '/auth/verify' && $method === 'POST') {
         $raw = trim((string) ($body['token'] ?? ''));
-        $st = db()->prepare('SELECT * FROM email_tokens WHERE token_hash=? AND purpose="verify" AND used_at IS NULL AND expires_at > NOW()');
+        $st = db()->prepare('SELECT * FROM aperto_email_tokens WHERE token_hash=? AND purpose="verify" AND used_at IS NULL AND expires_at > NOW()');
         $st->execute([hash('sha256', $raw)]);
         $row = $st->fetch();
         if (!$row) {
             fail('Link non valido o scaduto.');
         }
-        db()->prepare('UPDATE users SET email_verified=1 WHERE id=?')->execute([(int) $row['user_id']]);
-        db()->prepare('UPDATE email_tokens SET used_at=NOW() WHERE id=?')->execute([(int) $row['id']]);
+        db()->prepare('UPDATE aperto_users SET email_verified=1 WHERE id=?')->execute([(int) $row['user_id']]);
+        db()->prepare('UPDATE aperto_email_tokens SET used_at=NOW() WHERE id=?')->execute([(int) $row['id']]);
         out(['ok' => true]);
     }
 
     if ($path === '/auth/forgot' && $method === 'POST') {
         rate_limit('forgot', 5);
         $email = strtolower(trim((string) ($body['email'] ?? '')));
-        $st = db()->prepare('SELECT * FROM users WHERE email=?');
+        $st = db()->prepare('SELECT * FROM aperto_users WHERE email=?');
         $st->execute([$email]);
         $u = $st->fetch();
         if ($u) {
@@ -197,16 +197,16 @@ try {
         if (strlen($password) < 8) {
             fail('Password di almeno 8 caratteri.');
         }
-        $st = db()->prepare('SELECT * FROM email_tokens WHERE token_hash=? AND purpose="reset" AND used_at IS NULL AND expires_at > NOW()');
+        $st = db()->prepare('SELECT * FROM aperto_email_tokens WHERE token_hash=? AND purpose="reset" AND used_at IS NULL AND expires_at > NOW()');
         $st->execute([hash('sha256', $raw)]);
         $row = $st->fetch();
         if (!$row) {
             fail('Link non valido o scaduto.');
         }
         $uid = (int) $row['user_id'];
-        db()->prepare('UPDATE users SET password_hash=? WHERE id=?')->execute([password_hash($password, PASSWORD_DEFAULT), $uid]);
-        db()->prepare('UPDATE email_tokens SET used_at=NOW() WHERE id=?')->execute([(int) $row['id']]);
-        db()->prepare('DELETE FROM sessions WHERE user_id=?')->execute([$uid]);
+        db()->prepare('UPDATE aperto_users SET password_hash=? WHERE id=?')->execute([password_hash($password, PASSWORD_DEFAULT), $uid]);
+        db()->prepare('UPDATE aperto_email_tokens SET used_at=NOW() WHERE id=?')->execute([(int) $row['id']]);
+        db()->prepare('DELETE FROM aperto_sessions WHERE user_id=?')->execute([$uid]);
         out(['ok' => true]);
     }
 
@@ -217,9 +217,9 @@ try {
         }
         set_time_limit(600);
         $farmacie = count(load_farmacie_csv());
-        db()->exec('DELETE FROM reports WHERE expires_at < NOW() - INTERVAL 7 DAY');
-        db()->exec('DELETE FROM sessions WHERE expires_at < NOW()');
-        db()->exec('DELETE FROM rate_limits WHERE window_start < NOW() - INTERVAL 1 DAY');
+        db()->exec('DELETE FROM aperto_reports WHERE expires_at < NOW() - INTERVAL 7 DAY');
+        db()->exec('DELETE FROM aperto_sessions WHERE expires_at < NOW()');
+        db()->exec('DELETE FROM aperto_rate_limits WHERE window_start < NOW() - INTERVAL 1 DAY');
 
         $now = new DateTimeImmutable('now');
         $isWindow = (int) $now->format('N') === 7 || is_italian_holiday($now) || (int) $now->format('G') >= 20;
@@ -227,13 +227,13 @@ try {
         $skipped = 0;
         if ($isWindow || !empty($_GET['force'])) {
             $today = $now->format('Y-m-d');
-            $users = db()->query('SELECT * FROM users WHERE alert_on=1 AND lat IS NOT NULL AND lng IS NOT NULL')->fetchAll();
+            $users = db()->query('SELECT * FROM aperto_users WHERE alert_on=1 AND lat IS NOT NULL AND lng IS NOT NULL')->fetchAll();
             foreach ($users as $u) {
                 if (!(int) $u['email_verified']) {
                     $skipped++;
                     continue;
                 }
-                $chk = db()->prepare('SELECT 1 FROM alert_log WHERE user_id=? AND sent_on=?');
+                $chk = db()->prepare('SELECT 1 FROM aperto_alert_log WHERE user_id=? AND sent_on=?');
                 $chk->execute([(int) $u['id'], $today]);
                 if ($chk->fetchColumn()) {
                     continue;
@@ -250,7 +250,7 @@ try {
                         . ($p['phone'] ? '<br>Tel. ' . htmlspecialchars($p['phone']) : '')
                         . '<br><small>' . ($p['opening_hours'] ? 'Orari: ' . htmlspecialchars($p['opening_hours']) : 'Segnalata aperta da altri utenti') . '</small></li>';
                 }
-                db()->prepare('INSERT INTO alert_log (user_id, sent_on) VALUES (?,?)')->execute([(int) $u['id'], $today]);
+                db()->prepare('INSERT INTO aperto_alert_log (user_id, sent_on) VALUES (?,?)')->execute([(int) $u['id'], $today]);
                 app_mail($u['email'], 'Farmacie aperte vicino a casa — Aperto Adesso',
                     '<p>Ciao ' . htmlspecialchars($u['name']) . ',</p><p>Secondo i dati in mappa, entro ' . (int) $u['radius_km']
                     . ' km da ' . htmlspecialchars((string) $u['place_name']) . ' risultano aperte ora:</p><ul>' . $li . '</ul>'
@@ -266,7 +266,7 @@ try {
     $uid = (int) $u['id'];
 
     if ($path === '/auth/logout' && $method === 'POST') {
-        db()->prepare('DELETE FROM sessions WHERE token_hash=?')->execute([hash('sha256', (string) bearer())]);
+        db()->prepare('DELETE FROM aperto_sessions WHERE token_hash=?')->execute([hash('sha256', (string) bearer())]);
         out(['ok' => true]);
     }
 
@@ -288,7 +288,7 @@ try {
         if ($name === '' || mb_strlen($name) > 80) {
             fail('Nome non valido.');
         }
-        db()->prepare('UPDATE users SET name=? WHERE id=?')->execute([$name, $uid]);
+        db()->prepare('UPDATE aperto_users SET name=? WHERE id=?')->execute([$name, $uid]);
         out(['user' => public_user(load_user($uid))]);
     }
 
@@ -299,7 +299,7 @@ try {
             fail('Scegli un comune o un indirizzo in Italia.');
         }
         $cats = parse_cats($body['cats'] ?? []);
-        db()->prepare('UPDATE users SET lat=?, lng=?, place_name=?, radius_km=?, cats=? WHERE id=?')->execute([
+        db()->prepare('UPDATE aperto_users SET lat=?, lng=?, place_name=?, radius_km=?, cats=? WHERE id=?')->execute([
             $lat, $lng,
             mb_substr(trim((string) ($body['place_name'] ?? '')), 0, 160),
             max(1, min(20, (int) ($body['radius_km'] ?? 5))),
@@ -314,7 +314,7 @@ try {
         if ($on && $u['lat'] === null) {
             fail('Prima salva la tua “casa” in Impostazioni.');
         }
-        db()->prepare('UPDATE users SET alert_on=? WHERE id=?')->execute([$on ? 1 : 0, $uid]);
+        db()->prepare('UPDATE aperto_users SET alert_on=? WHERE id=?')->execute([$on ? 1 : 0, $uid]);
         out(['user' => public_user(load_user($uid))]);
     }
 
@@ -326,7 +326,7 @@ try {
         if (strlen($np) < 8) {
             fail('Nuova password di almeno 8 caratteri.');
         }
-        db()->prepare('UPDATE users SET password_hash=? WHERE id=?')->execute([password_hash($np, PASSWORD_DEFAULT), $uid]);
+        db()->prepare('UPDATE aperto_users SET password_hash=? WHERE id=?')->execute([password_hash($np, PASSWORD_DEFAULT), $uid]);
         out(['ok' => true]);
     }
 
@@ -334,12 +334,12 @@ try {
         foreach (['favorites', 'reports', 'sessions', 'email_tokens', 'alert_log'] as $t) {
             db()->prepare("DELETE FROM $t WHERE user_id=?")->execute([$uid]);
         }
-        db()->prepare('DELETE FROM users WHERE id=?')->execute([$uid]);
+        db()->prepare('DELETE FROM aperto_users WHERE id=?')->execute([$uid]);
         out(['ok' => true]);
     }
 
     if ($path === '/favorites' && $method === 'GET') {
-        $st = db()->prepare('SELECT place_key, snapshot FROM favorites WHERE user_id=? ORDER BY place_key');
+        $st = db()->prepare('SELECT place_key, snapshot FROM aperto_favorites WHERE user_id=? ORDER BY place_key');
         $st->execute([$uid]);
         $rows = array_map(static fn($r) => ['key' => $r['place_key'], 'snapshot' => json_decode((string) $r['snapshot'], true)], $st->fetchAll());
         out(['favorites' => $rows]);
@@ -351,18 +351,18 @@ try {
             fail('Luogo non valido.');
         }
         $snap = is_array($body['snapshot'] ?? null) ? array_intersect_key($body['snapshot'], array_flip(['name', 'category', 'address', 'phone', 'lat', 'lng', 'opening_hours'])) : null;
-        $cnt = db()->prepare('SELECT COUNT(*) FROM favorites WHERE user_id=?');
+        $cnt = db()->prepare('SELECT COUNT(*) FROM aperto_favorites WHERE user_id=?');
         $cnt->execute([$uid]);
         if ((int) $cnt->fetchColumn() >= 200) {
             fail('Hai raggiunto il massimo di 200 preferiti.');
         }
-        db()->prepare('INSERT INTO favorites (user_id, place_key, snapshot) VALUES (?,?,?) ON DUPLICATE KEY UPDATE snapshot=VALUES(snapshot)')
+        db()->prepare('INSERT INTO aperto_favorites (user_id, place_key, snapshot) VALUES (?,?,?) ON DUPLICATE KEY UPDATE snapshot=VALUES(snapshot)')
             ->execute([$uid, $key, $snap ? json_encode($snap, JSON_UNESCAPED_UNICODE) : null]);
         out(['ok' => true], 201);
     }
 
     if (preg_match('#^/favorites/(.+)$#', $path, $m) && $method === 'DELETE') {
-        db()->prepare('DELETE FROM favorites WHERE user_id=? AND place_key=?')->execute([$uid, rawurldecode($m[1])]);
+        db()->prepare('DELETE FROM aperto_favorites WHERE user_id=? AND place_key=?')->execute([$uid, rawurldecode($m[1])]);
         out(['ok' => true]);
     }
 
@@ -376,14 +376,14 @@ try {
         if (mb_strlen($note) > 200) {
             fail('Nota di massimo 200 caratteri.');
         }
-        $cnt = db()->prepare('SELECT COUNT(*) FROM reports WHERE user_id=? AND created_at > NOW() - INTERVAL 1 DAY');
+        $cnt = db()->prepare('SELECT COUNT(*) FROM aperto_reports WHERE user_id=? AND created_at > NOW() - INTERVAL 1 DAY');
         $cnt->execute([$uid]);
         if ((int) $cnt->fetchColumn() >= 20) {
             fail('Massimo 20 segnalazioni al giorno.', 429);
         }
         // One live report per user and place: a new one replaces the previous.
-        db()->prepare('DELETE FROM reports WHERE user_id=? AND place_key=? AND expires_at > NOW()')->execute([$uid, $key]);
-        db()->prepare('INSERT INTO reports (user_id, place_key, kind, note, expires_at) VALUES (?,?,?,?, NOW() + INTERVAL 12 HOUR)')
+        db()->prepare('DELETE FROM aperto_reports WHERE user_id=? AND place_key=? AND expires_at > NOW()')->execute([$uid, $key]);
+        db()->prepare('INSERT INTO aperto_reports (user_id, place_key, kind, note, expires_at) VALUES (?,?,?,?, NOW() + INTERVAL 12 HOUR)')
             ->execute([$uid, $key, $kind, $note !== '' ? $note : null]);
         out(['ok' => true], 201);
     }

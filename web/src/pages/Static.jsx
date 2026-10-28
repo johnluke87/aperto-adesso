@@ -34,6 +34,7 @@ export function Privacy() {
       <p><b>Con account</b> conserviamo: nome, email, password (cifrata), la “casa” che scegli (coordinate, nome del luogo, raggio, categorie), i preferiti, le segnalazioni (12 ore di validità, poi cancellate entro 7 giorni) e il registro degli avvisi inviati.</p>
       <p>Usiamo l’email solo per conferma, recupero password e gli avvisi che attivi tu. Nessuna pubblicità, nessuna cessione a terzi.</p>
       <p>Le mappe sono caricate dai server di OpenStreetMap, che ricevono il tuo IP come per qualsiasi sito.</p>
+      <p><b>Cookie e statistiche.</b> L’accesso usa un token salvato nel browser, non un cookie. Google Analytics si carica solo se lo accetti nel banner dei cookie; puoi cambiare idea da “Preferenze cookie” nel riquadro del caffè.</p>
       <p>Puoi eliminare l’account in qualsiasi momento da <a href="#/impostazioni">Impostazioni</a>: la cancellazione è immediata e totale.</p>
     </div>
   )

@@ -445,7 +445,7 @@ function attach_reports(array $places, DateTimeImmutable $at): array {
     }
     $keys = array_column($places, 'key');
     $in = implode(',', array_fill(0, count($keys), '?'));
-    $st = db()->prepare("SELECT place_key, kind, COUNT(*) c FROM reports WHERE expires_at > ? AND created_at <= ? AND place_key IN ($in) GROUP BY place_key, kind");
+    $st = db()->prepare("SELECT place_key, kind, COUNT(*) c FROM aperto_reports WHERE expires_at > ? AND created_at <= ? AND place_key IN ($in) GROUP BY place_key, kind");
     $ts = $at->format('Y-m-d H:i:s');
     $st->execute(array_merge([$ts, $ts], $keys));
     $map = [];
